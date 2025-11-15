@@ -286,9 +286,11 @@
             inputField.focus();
         }
 
-        // --- Gemini API Configuration (Rest of the script remains unchanged) ---
-        const API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
-        const API_KEY = ""; // Placeholder for Canvas environment
+        // --- Gemini API Configuration (UPDATED for Proxy) ---
+        // The API key is now handled by the proxy, so we don't need the const API_KEY = ""; line.
+        const API_PROXY_URL = "/__api/proxy";
+        const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
+
 
         /**
          * Utility for Exponential Backoff for retrying API calls.
@@ -315,44 +317,64 @@
         }
 
         /**
-         * Calls the Gemini API with search grounding for an up-to-date response.
+         * Calls the Gemini API using the secure proxy with search grounding.
          * @param {string} userQuery - The user's message.
          * @returns {Promise<string>} The generated AI response text.
          */
         async function callGeminiApi(userQuery) {
-            const apiUrl = `${API_URL_BASE}?key=${API_KEY}`;
             
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                // Enable Google Search grounding
-                tools: [{ "google_search": {} }],
-                // Set a simple system instruction
-                systemInstruction: {
-                    parts: [{ text: "You are Krish, a helpful, friendly, and concise AI assistant. Answer questions directly using the most up-to-date information available." }]
-                },
+            // The structure is wrapped for the proxy, including the model and endpoint
+            const proxyPayload = {
+                model: MODEL_NAME,
+                endpoint: "generateContent",
+                payload: {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    // Enable Google Search grounding
+                    tools: [{ "google_search": {} }],
+                    // Set a simple system instruction
+                    systemInstruction: {
+                        parts: [{ text: "You are Krish, a helpful, friendly, and concise AI assistant. Answer questions directly using the most up-to-date information available." }]
+                    },
+                }
             };
 
             const options = {
                 method: 'POST',
+                // Use the API Proxy URL and set the correct content type
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(proxyPayload)
             };
 
             try {
-                const response = await fetchWithBackoff(apiUrl, options);
+                const response = await fetchWithBackoff(API_PROXY_URL, options);
                 const result = await response.json();
 
                 const candidate = result.candidates?.[0];
+
+                // 1. Check for valid text content
                 if (candidate && candidate.content?.parts?.[0]?.text) {
                     return candidate.content.parts[0].text;
-                } else {
-                    console.error("Gemini API response structure invalid:", result);
-                    return "Sorry, I received an invalid response from the AI. Please try again.";
+                } 
+                
+                // 2. Check if the response was blocked by safety filters
+                if (candidate && (candidate.safetyRatings || candidate.finishReason === 'SAFETY')) {
+                    console.warn("Gemini API response blocked by safety filters:", candidate);
+                    return "I'm sorry, but my response was blocked due to safety guidelines. Please rephrase your query.";
+                }
+                
+                // 3. Handle other invalid response structures
+                if (candidate) {
+                    console.error("Gemini API response candidate missing text content:", result);
+                    return "I received a response, but the content was empty. Can you try asking differently?";
                 }
 
+                // 4. Handle completely missing candidates
+                console.error("Gemini API response structure invalid or empty:", result);
+                return "Sorry, I received an invalid response from the AI. Please try again.";
+
             } catch (error) {
-                console.error("Error calling Gemini API:", error);
-                return "I apologize, an error occurred while trying to connect to the AI service.";
+                console.error("Error calling Gemini API via proxy:", error);
+                return "I apologize, an error occurred while trying to connect to the AI service (Proxy failed).";
             }
         }
 
@@ -374,80 +396,4 @@
                 messageWrapper.appendChild(aiAvatar);
             }
 
-            const messageBubble = document.createElement('div');
-            // Text size updated to text-xl here
-            messageBubble.className = `max-w-xs sm:max-w-md p-3 rounded-xl shadow-lg text-xl ${
-                sender === 'user'
-                    ? 'bg-k-purple text-white rounded-br-none'
-                    : 'bg-bubble-ai text-gray-100 rounded-tl-none'
-            }`;
-            messageBubble.textContent = text;
-            messageWrapper.appendChild(messageBubble);
-
-            // If it's a user message, the avatar doesn't exist, so append the bubble directly.
-            // If it's an AI message, the avatar and bubble are appended to the wrapper, then the wrapper is added.
-            chatContainer.appendChild(messageWrapper);
-
-            // Scroll to the bottom to view the new message
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-
-        /**
-         * Handles the send button click or Enter key press.
-         */
-        async function sendMessage() {
-            const message = inputField.value.trim();
-            if (message === "") return; // Don't send empty messages
-
-            // 1. Append User Message
-            appendMessage(message, 'user');
-
-            // Clear and disable input/button
-            inputField.value = '';
-            inputField.disabled = true;
-            sendButton.disabled = true;
-
-            // 2. Show Loading Indicator
-            loadingIndicator.classList.remove('hidden');
-            chatContainer.scrollTop = chatContainer.scrollHeight; // Scroll to show spinner
-
-            let aiResponseText = '';
-
-            try {
-                // 3. Call the actual AI API
-                aiResponseText = await callGeminiApi(message);
-            } catch (error) {
-                aiResponseText = "An unexpected client-side error occurred.";
-            } finally {
-                // 4. Hide Loading Indicator
-                loadingIndicator.classList.add('hidden');
-                
-                // 5. Append AI Response
-                appendMessage(aiResponseText, 'ai');
-
-                // 6. Re-enable input
-                inputField.disabled = false;
-                sendButton.disabled = false;
-                inputField.focus();
-            }
-        }
-
-        /**
-         * Allows sending the message by pressing the Enter key.
-         */
-        function handleKeyPress(event) {
-            if (event.key === 'Enter') {
-                sendMessage();
-            }
-        }
-
-        // Initialize by setting initial focus on the input field
-        document.addEventListener('DOMContentLoaded', () => {
-            inputField.focus();
-            // Ensure initial scroll is at the bottom (for the first message)
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        });
-    </script>
-</body>
-</html>
-
+            const messageBubble = document.createElement('di
