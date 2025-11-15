@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Krish AI Assistant</title>
+    <!-- Load Tailwind CSS --><script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Setting 'Inter' font and ensuring body fills the screen on mobile */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0b0f19; /* Very dark background, similar to the image */
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Adjust the main content area to fit between the fixed header and footer */
+        #chat-container {
+            /* Increased padding to accommodate larger header (h-24 = 6rem) */
+            padding-top: 6rem;
+            /* Increased padding to accommodate larger footer (h-32 = 8rem) */
+            padding-bottom: 8rem; 
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        /* Sidebar Styles */
+        #sidebar-menu {
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(-100%); /* Start off-screen */
+        }
+        #sidebar-menu.open {
+            transform: translateX(0); /* Slide in */
+        }
+        
+        /* Backdrop for when the menu is open */
+        #backdrop {
+            transition: opacity 0.3s ease-in-out;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #backdrop.visible {
+            opacity: 0.5;
+            pointer-events: auto;
+        }
+
+        /* --- Rainbow Ring Animation for AI Avatar --- */
+        @keyframes rotate-gradient {
+            to { transform: rotate(360deg); }
+        }
+        
+        .rainbow-ring {
+            position: relative;
+            /* Use padding to push the background out, creating the ring space */
+            padding: 3px; 
+            border-radius: 50%;
+            overflow: visible; /* Must be visible to see the pseudo-element background */
+        }
+
+        .rainbow-ring::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            /* Create the rotating conic gradient for the rainbow effect */
+            background: conic-gradient(
+                #FF0000, #FF7F00, #FFFF00, #00FF00, #0000FF, #4B0082, #9400D3, #FF0000
+            );
+            border-radius: 50%;
+            animation: rotate-gradient 4s linear infinite;
+            z-index: -1; /* Place behind the actual avatar content */
+        }
+
+        /* The inner div holds the solid color and the letter 'K' */
+        .rainbow-ring > div {
+            /* We need to apply the actual background color here and make sure it covers the background inside the padding */
+            background-color: #5A67D8; /* Using explicit hex for consistent styling */
+            border-radius: 50%;
+            /* The size is defined by the avatar element's w-8 h-8 */
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            z-index: 1;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-dark': '#181C26',
+                        'accent-dark': '#2E3547',
+                        'bubble-ai': '#2E3547',
+                        'bubble-user': '#4A5568',
+                        'k-purple': '#5A67D8', /* A nice accent color */
+                        'sidebar-bg': '#10141f', /* Slightly darker than primary-dark */
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="text-white">
+
+    <!-- Sidebar Menu (Mobile First: fixed, full height, 75% width, off-screen) --><div id="sidebar-menu" class="fixed top-0 left-0 h-full w-3/4 sm:w-80 bg-sidebar-bg z-30 flex flex-col p-6 shadow-2xl border-r border-gray-800">
+        <!-- Sidebar Header (Avatar and App Name) --><div class="flex items-center space-x-4 mb-10 pb-4 border-b border-gray-700">
+            <div class="w-12 h-12 rounded-full bg-k-purple flex items-center justify-center text-xl font-bold flex-shrink-0">
+                KK
+            </div>
+            <h2 class="text-2xl font-semibold text-gray-100">Krish</h2>
+        </div>
+        
+        <!-- Menu Items --><nav class="space-y-4 flex-grow">
+            <button onclick="startNewChat()" class="flex items-center space-x-3 w-full p-3 rounded-xl bg-k-purple hover:bg-indigo-600 transition-colors text-white font-medium shadow-md">
+                <!-- Plus Icon --><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>New Chat</span>
+            </button>
+            
+            <!-- About Us Button - Replaced Settings and added modal handler -->
+            <button onclick="showAboutUsModal()" class="flex items-center space-x-3 w-full p-3 rounded-xl hover:bg-accent-dark transition-colors text-gray-200 font-medium">
+                <!-- Information Icon --><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>About Us</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Backdrop to close the menu when clicking outside --><div id="backdrop" class="fixed inset-0 bg-black z-20" onclick="toggleSidebar()"></div>
+
+    <!-- Fixed Header - Increased height to h-24 --><header class="fixed top-0 left-0 right-0 z-10 bg-primary-dark shadow-xl border-b border-gray-800 p-4 h-24 flex items-center">
+        <!-- Inner container for alignment --><div class="flex items-center space-x-3 w-full max-w-lg mx-auto">
+            <!-- Menu Button (Hamburger Icon) --><button id="menu-btn" onclick="toggleSidebar()" class="p-2 mr-2 rounded-lg hover:bg-accent-dark transition-colors focus:outline-none focus:ring-2 focus:ring-k-purple flex-shrink-0" aria-label="Open menu">
+                <!-- Hamburger Icon SVG --><svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </button>
+            
+            <!-- Avatar - Increased size to w-12 h-12 and text to text-xl --><div class="w-12 h-12 rounded-full bg-k-purple flex items-center justify-center text-xl font-bold flex-shrink-0">
+                KK
+            </div>
+            <!-- Title - Changed text to 'Krish' and kept size (text-2xl) --><h1 class="text-2xl font-semibold text-gray-100 truncate">Krish</h1>
+        </div>
+    </header>
+
+    <!-- Chat Messages Container --><main id="chat-container" class="flex flex-col space-y-4 px-4 w-full max-w-lg mx-auto">
+        <!-- Initial AI Message (from the screenshot) - Text size increased to text-xl -->
+        <div class="flex justify-start items-end space-x-2">
+            <!-- AI Avatar for initial message -->
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 rainbow-ring">
+                <div>K</div>
+            </div>
+            <div class="max-w-xs sm:max-w-md p-3 rounded-xl rounded-tl-none bg-bubble-ai shadow-lg text-xl">
+                Hello! I'm Krish, an AI assistant ready to help. Ask me anything.
+            </div>
+        </div>
+
+        <!-- AI Loading Indicator (Spinner) -->
+        <div id="loading-indicator" class="hidden flex justify-start items-end space-x-2">
+             <!-- AI Avatar for loading indicator -->
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 rainbow-ring">
+                <div>K</div>
+            </div>
+            <div class="max-w-xs sm:max-w-md p-3 rounded-xl rounded-tl-none bg-bubble-ai text-gray-100 text-xl flex items-center space-x-2">
+                <!-- Simple Tailwind Spinner SVG --><svg class="animate-spin h-5 w-5 text-k-purple" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Krish is typing...</span>
+            </div>
+        </div>
+
+        <!-- NOTE: Removed placeholder messages as they are no longer needed --></main>
+
+    <!-- Fixed Input Footer - Increased height to h-32 --><footer class="fixed bottom-0 left-0 right-0 z-10 bg-primary-dark p-4 border-t border-gray-800 h-32 flex items-center">
+        <div class="flex items-center space-x-3 w-full max-w-lg mx-auto">
+            <!-- Input field padding increased to p-5 --><input
+                id="message-input"
+                type="text"
+                placeholder="Ask Krish anything..."
+                class="flex-grow p-5 text-white bg-accent-dark rounded-full focus:outline-none focus:ring-2 focus:ring-k-purple placeholder-gray-400 text-lg border-2 border-transparent focus:border-k-purple transition-all duration-200"
+                aria-label="Message input"
+                onkeypress="handleKeyPress(event)"
+            >
+            <!-- Send Button - Increased size to w-14 h-14 --><button
+                id="send-button"
+                onclick="sendMessage()"
+                class="w-14 h-14 flex items-center justify-center bg-k-purple rounded-full hover:bg-indigo-600 transition-colors duration-200 shadow-xl focus:outline-none focus:ring-2 focus:ring-k-purple focus:ring-offset-2 focus:ring-offset-primary-dark"
+                aria-label="Send message"
+            >
+                <!-- Send Icon (SVG) - Increased size to h-7 w-7 --><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-white transform -rotate-45 -mt-0.5 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+            </button>
+        </div>
+    </footer>
+
+    <!-- About Us Modal -->
+    <div id="about-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4" onclick="closeAboutUsModal()">
+        <div class="bg-primary-dark p-6 rounded-2xl shadow-2xl w-full max-w-sm" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <h3 class="text-2xl font-bold text-k-purple">About Krish</h3>
+                <button onclick="closeAboutUsModal()" class="text-gray-400 hover:text-white transition-colors" aria-label="Close modal">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-3 text-lg">
+                <p class="flex justify-between">
+                    <span class="font-semibold text-gray-300">Owner Name:</span>
+                    <span class="text-white">KING KRISH</span>
+                </p>
+                <p class="flex justify-between">
+                    <span class="font-semibold text-gray-300">Occupation:</span>
+                    <span class="text-white">Student, C3B</span>
+                </p>
+                <p class="flex justify-between">
+                    <span class="font-semibold text-gray-300">Admin ID:</span>
+                    <span class="text-white">1769584</span>
+                </p>
+            </div>
+            <button onclick="closeAboutUsModal()" class="mt-6 w-full py-3 bg-k-purple rounded-xl hover:bg-indigo-600 font-semibold transition-colors">
+                Got It
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const inputField = document.getElementById('message-input');
+        const chatContainer = document.getElementById('chat-container');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const sendButton = document.getElementById('send-button');
+        const sidebar = document.getElementById('sidebar-menu');
+        const backdrop = document.getElementById('backdrop');
+
+        // --- Modal Logic ---
+
+        /**
+         * Shows the About Us modal and closes the sidebar if it's open.
+         */
+        function showAboutUsModal() {
+            const aboutModal = document.getElementById('about-modal');
+            aboutModal.classList.remove('hidden');
+            if (sidebar.classList.contains('open')) {
+                toggleSidebar(); // Close sidebar if open for better UX
+            }
+        }
+
+        /**
+         * Closes the About Us modal.
+         */
+        function closeAboutUsModal() {
+            const aboutModal = document.getElementById('about-modal');
+            aboutModal.classList.add('hidden');
+        }
+
+        // --- Sidebar Logic ---
+
+        /**
+         * Toggles the visibility of the sidebar menu and the backdrop overlay.
+         */
+        function toggleSidebar() {
+            sidebar.classList.toggle('open');
+            backdrop.classList.toggle('visible');
+            document.body.classList.toggle('overflow-hidden'); // Prevent scrolling body when menu is open
+        }
+
+        /**
+         * Clears all messages from the chat container, effectively starting a new chat.
+         */
+        function startNewChat() {
+            // Clear all messages except the first AI greeting message and the loading indicator
+            while (chatContainer.children.length > 2) { 
+                chatContainer.removeChild(chatContainer.children[1]); // Remove everything after the initial greeting
+            }
+            toggleSidebar(); // Close the menu
+            inputField.focus();
+        }
+
+        // --- Gemini API Configuration (Rest of the script remains unchanged) ---
+        const API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const API_KEY = ""; // Placeholder for Canvas environment
+
+        /**
+         * Utility for Exponential Backoff for retrying API calls.
+         */
+        async function fetchWithBackoff(url, options, maxRetries = 5) {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status !== 429) { // Not a rate limit error
+                        return response;
+                    }
+                    // If rate limit, wait and retry
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    // Suppressing console log as per instructions
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } catch (error) {
+                    // Suppressing console log as per instructions
+                    if (attempt === maxRetries - 1) throw error;
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            throw new Error("Gemini API request failed after maximum retries.");
+        }
+
+        /**
+         * Calls the Gemini API with search grounding for an up-to-date response.
+         * @param {string} userQuery - The user's message.
+         * @returns {Promise<string>} The generated AI response text.
+         */
+        async function callGeminiApi(userQuery) {
+            const apiUrl = `${API_URL_BASE}?key=${API_KEY}`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                // Enable Google Search grounding
+                tools: [{ "google_search": {} }],
+                // Set a simple system instruction
+                systemInstruction: {
+                    parts: [{ text: "You are Krish, a helpful, friendly, and concise AI assistant. Answer questions directly using the most up-to-date information available." }]
+                },
+            };
+
+            const options = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            };
+
+            try {
+                const response = await fetchWithBackoff(apiUrl, options);
+                const result = await response.json();
+
+                const candidate = result.candidates?.[0];
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    return candidate.content.parts[0].text;
+                } else {
+                    console.error("Gemini API response structure invalid:", result);
+                    return "Sorry, I received an invalid response from the AI. Please try again.";
+                }
+
+            } catch (error) {
+                console.error("Error calling Gemini API:", error);
+                return "I apologize, an error occurred while trying to connect to the AI service.";
+            }
+        }
+
+
+        /**
+         * Simple function to add a message bubble to the chat container.
+         * @param {string} text - The message content.
+         * @param {string} sender - 'user' or 'ai'.
+         */
+        function appendMessage(text, sender) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'} items-end space-x-2`;
+
+            if (sender === 'ai') {
+                const aiAvatar = document.createElement('div');
+                // Note: The avatar itself is w-8 h-8
+                aiAvatar.className = "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 rainbow-ring";
+                aiAvatar.innerHTML = '<div>K</div>'; // Inner div for solid background
+                messageWrapper.appendChild(aiAvatar);
+            }
+
+            const messageBubble = document.createElement('div');
+            // Text size updated to text-xl here
+            messageBubble.className = `max-w-xs sm:max-w-md p-3 rounded-xl shadow-lg text-xl ${
+                sender === 'user'
+                    ? 'bg-k-purple text-white rounded-br-none'
+                    : 'bg-bubble-ai text-gray-100 rounded-tl-none'
+            }`;
+            messageBubble.textContent = text;
+            messageWrapper.appendChild(messageBubble);
+
+            // If it's a user message, the avatar doesn't exist, so append the bubble directly.
+            // If it's an AI message, the avatar and bubble are appended to the wrapper, then the wrapper is added.
+            chatContainer.appendChild(messageWrapper);
+
+            // Scroll to the bottom to view the new message
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        /**
+         * Handles the send button click or Enter key press.
+         */
+        async function sendMessage() {
+            const message = inputField.value.trim();
+            if (message === "") return; // Don't send empty messages
+
+            // 1. Append User Message
+            appendMessage(message, 'user');
+
+            // Clear and disable input/button
+            inputField.value = '';
+            inputField.disabled = true;
+            sendButton.disabled = true;
+
+            // 2. Show Loading Indicator
+            loadingIndicator.classList.remove('hidden');
+            chatContainer.scrollTop = chatContainer.scrollHeight; // Scroll to show spinner
+
+            let aiResponseText = '';
+
+            try {
+                // 3. Call the actual AI API
+                aiResponseText = await callGeminiApi(message);
+            } catch (error) {
+                aiResponseText = "An unexpected client-side error occurred.";
+            } finally {
+                // 4. Hide Loading Indicator
+                loadingIndicator.classList.add('hidden');
+                
+                // 5. Append AI Response
+                appendMessage(aiResponseText, 'ai');
+
+                // 6. Re-enable input
+                inputField.disabled = false;
+                sendButton.disabled = false;
+                inputField.focus();
+            }
+        }
+
+        /**
+         * Allows sending the message by pressing the Enter key.
+         */
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Initialize by setting initial focus on the input field
+        document.addEventListener('DOMContentLoaded', () => {
+            inputField.focus();
+            // Ensure initial scroll is at the bottom (for the first message)
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        });
+    </script>
+</body>
+</html>
+
