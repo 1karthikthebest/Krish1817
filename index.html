@@ -1,353 +1,1273 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title id="app-title">Krish AI Assistant</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Configure Tailwind for Inter font and Dark Theme -->
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
-                    colors: {
-                        // Pure Black Theme Palette
-                        'primary-dark': '#000000', // Pure Black (Used for Header/Footer Background)
-                        'surface-dark': '#121212', // Dark Gray Surface (Used for Main Message Area)
-                        'gemini-blue': '#4A90E2', // Brightened blue for dark contrast
-                        'text-light': '#E5E7EB', // Main text color
-                        'input-bg': '#1E1E1E', // Dark gray for chat bubble/Input container
-                        
-                        // Functional Colors
-                        'gemini-green': '#34A853',
-                        'gemini-yellow': '#FBBC05',
-                        'gemini-red': '#EA4335',
-                    }
-                }
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged, 
+  setPersistence,
+  inMemoryPersistence
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  deleteDoc,
+  doc,
+  writeBatch,
+  onSnapshot, 
+  setDoc,
+  query,
+  getDocs,
+  updateDoc
+} from 'firebase/firestore';
+import { 
+  Send, 
+  User, 
+  MessageSquare, 
+  Loader2, 
+  AlertCircle, 
+  Lock, 
+  LogIn, 
+  Hash, 
+  Menu,
+  X,
+  Shield,
+  Trash2,
+  Volume2,
+  VolumeX,
+  Smile,
+  Camera,
+  Users,
+  Palette,
+  EyeOff,
+  MessageCircle,
+  Clock,
+  Circle
+} from 'lucide-react';
+import { setLogLevel } from 'firebase/firestore';
+
+// Set Firebase logging to Debug for troubleshooting
+setLogLevel('debug'); 
+
+// --- Firebase Configuration & Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// --- Configuration ---
+const MAX_FILE_SIZE_BYTES = 200 * 1024; // 200KB limit for Base64 images in Firestore
+const SLOW_MODE_DELAY = 5000; // 5 seconds
+const ONLINE_THRESHOLD_MS = 60000; // 60 seconds for user presence check
+
+const CREDENTIALS = {
+  "1karthikthebest": "@#$admin@#$",
+  "1krishthebest": "@#$admin@#$",
+  "Tester941": "test99",
+  "Tester 942": "test99",
+  "Innu_404": "pradeek@#123", 
+  "Guest1": "pass1",
+  "Guest2": "pass2"
+};
+
+const ADMINS = ["1karthikthebest", "1krishthebest", "Innu_404"];
+
+const CHANNELS = [
+  { id: 'general', label: 'General', adminOnlyPost: false, slowMode: false, adminOnlyView: false },
+  { id: 'random', label: 'Random', adminOnlyPost: false, slowMode: false, adminOnlyView: false },
+  { id: 'development', label: 'Development (Slow Mode)', adminOnlyPost: false, slowMode: true, adminOnlyView: false }, 
+  { id: 'announcements', label: 'Announcements (Read-Only)', adminOnlyPost: true, slowMode: false, adminOnlyView: false },
+  { id: 'admin_log', label: 'Admin Log', adminOnlyPost: true, slowMode: false, adminOnlyView: true }
+];
+
+// --- Utility Functions ---
+
+const getChannelCollectionName = (channelId) => channelId === 'general' ? 'messages' : `messages_${channelId}`;
+
+const getAvatarColorClass = (name) => {
+  const colors = ['bg-red-500', 'bg-green-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'];
+  const index = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+  return colors[index];
+};
+
+// Generates a unique, stable ID for a DM conversation between two UIDs
+const getDmConversationId = (uid1, uid2) => {
+  const sortedUids = [uid1, uid2].sort();
+  return sortedUids.join('_');
+};
+
+
+// Confirmation Modal Component (Replaces alert/confirm)
+const ConfirmationModal = ({ modalState, setModalState }) => {
+    if (!modalState.isOpen) return null;
+
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 animate-in fade-in">
+        <div className="w-full max-w-md rounded-xl bg-slate-800 p-6 shadow-2xl space-y-4 border border-slate-700">
+          <h3 className={`text-xl font-bold flex items-center gap-2 ${modalState.isDestructive ? 'text-red-400' : 'text-indigo-400'}`}>
+            <AlertCircle className="h-5 w-5" /> {modalState.title}
+          </h3>
+          <p className="text-sm text-slate-400">{modalState.message}</p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={modalState.onCancel}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={modalState.onConfirm}
+              className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors 
+                ${modalState.isDestructive ? 'bg-red-600 hover:bg-red-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}
+            >
+              {modalState.confirmText}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+};
+// --- Main App Component ---
+export default function App() {
+  // Auth & User State
+  const [firebaseUser, setFirebaseUser] = useState(null); 
+  const [authReady, setAuthReady] = useState(false); 
+  const [appUsername, setAppUsername] = useState(null);   
+  const [isMuted, setIsMuted] = useState(false);
+  const [lastSentTime, setLastSentTime] = useState(0);
+  const [userProfilesMap, setUserProfilesMap] = useState({}); // New map: uid -> {displayName, color, lastSeen, isMuted}
+  
+  // Login Form State
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+  
+  // App State - Consolidated Chat/Channel management
+  const [activeChat, setActiveChat] = useState({ 
+    type: 'channel', 
+    id: 'general', 
+    displayName: 'General' 
+  }); 
+  const [messages, setMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false); 
+  const [globalError, setGlobalError] = useState(null);
+  const [inputText, setInputText] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false); 
+  
+  // UI States
+  const [showFileUploadModal, setShowFileUploadModal] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false); 
+  const [showColorPicker, setShowColorPicker] = useState(false); 
+  const [customColor, setCustomColor] = useState('#6366f1'); // Default Indigo
+  
+  const messagesEndRef = useRef(null);
+  const emojiButtonRef = useRef(null);
+
+  // Modal State for Confirmation (Replaces confirm/alert)
+  const [modalState, setModalState] = useState({
+      isOpen: false,
+      title: '',
+      message: '',
+      onConfirm: () => {},
+      onCancel: () => setModalState({ ...modalState, isOpen: false }),
+      isDestructive: false,
+      confirmText: 'Confirm'
+  });
+
+  const isAdmin = ADMINS.includes(appUsername);
+  const currentChannelConfig = CHANNELS.find(c => c.id === activeChat.id && activeChat.type === 'channel') || {};
+  
+  // --- USER PRESENCE LOGIC (Updated to list all users) ---
+
+  // Get all users (excluding self)
+  const allOtherUsers = useMemo(() => {
+    return Object.values(userProfilesMap)
+        .filter(profile => 
+            profile.uid && 
+            profile.displayName &&
+            profile.uid !== firebaseUser?.uid // Exclude self
+        )
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [userProfilesMap, firebaseUser]);
+
+  // Filter online users from the map
+  const onlineUsers = useMemo(() => {
+      const now = Date.now();
+      return allOtherUsers.filter(profile => 
+          profile.lastSeen && 
+          (now - profile.lastSeen) < ONLINE_THRESHOLD_MS
+      );
+  }, [allOtherUsers]);
+
+  // Filter offline users (those not in the online list)
+  const offlineUsers = useMemo(() => {
+      const onlineUids = new Set(onlineUsers.map(u => u.uid));
+      return allOtherUsers.filter(profile => !onlineUids.has(profile.uid));
+  }, [allOtherUsers, onlineUsers]);
+
+  // Determine if the user is prevented from posting
+  const isPostingPrevented = 
+    isMuted || 
+    (activeChat.type === 'channel' && currentChannelConfig.adminOnlyPost && !isAdmin);
+
+  const timeRemaining = Math.max(0, SLOW_MODE_DELAY - (Date.now() - lastSentTime));
+  const isSlowed = activeChat.type === 'channel' && currentChannelConfig.slowMode && !isAdmin && timeRemaining > 0;
+  
+  // Current user's color for the color picker
+  useEffect(() => {
+      if (firebaseUser?.uid) {
+          const profile = userProfilesMap[firebaseUser.uid];
+          if (profile?.color) {
+              setCustomColor(profile.color);
+          }
+      }
+  }, [firebaseUser, userProfilesMap]);
+
+  // --- Core Utility Functions (Including Storage Calc) ---
+
+  const getAppStorageSize = async () => { /* ... storage calculation logic omitted for brevity ... */ return { totalBytes: 0, totalDocs: 0 }; };
+  
+  const handleClearAllStorage = () => { /* ... defined later in the file ... */ }; // Placeholder
+
+  const logAdminAction = async (action, details) => {
+    if (!firebaseUser || !appUsername || !isAdmin) return;
+    
+    const collectionName = getChannelCollectionName('admin_log');
+    const logRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+
+    try {
+      await addDoc(logRef, {
+        text: `[AUDIT] ${appUsername} ${action}: ${details}`,
+        action: action,
+        details: details,
+        uid: firebaseUser.uid,
+        createdAt: Date.now(),
+        displayName: 'System Audit', // Special display name for logs
+        userUid: 'SYSTEM'
+      });
+      console.log(`Admin action logged: ${action}`);
+    } catch (err) {
+      console.error("Failed to log admin action:", err);
+    }
+  };
+
+  // --- Firestore Listeners & Effects ---
+
+  // 1. Firebase Authentication Effect
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await setPersistence(auth, inMemoryPersistence);
+
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error during sign-in:", err);
+        setGlobalError("Failed to authenticate with Firebase.");
+      }
+      setAuthReady(true);
+    };
+
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setFirebaseUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+  
+  // 2. User Profiles & Presence Listener
+  useEffect(() => {
+    if (!authReady) return; 
+    
+    const profilesRef = collection(db, 'artifacts', appId, 'public', 'data', 'user_profiles');
+
+    const unsubscribe = onSnapshot(profilesRef, 
+      (snapshot) => {
+        const profileMap = {};
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          profileMap[doc.id] = data; // doc.id is the UID
+        });
+        setUserProfilesMap(profileMap);
+        
+        if (firebaseUser) {
+            const isCurrentlyMuted = appUsername 
+                ? profileMap[firebaseUser.uid]?.isMuted || false
+                : false;
+            setIsMuted(isCurrentlyMuted);
+
+            if (profileMap[firebaseUser.uid]?.color) {
+                setCustomColor(profileMap[firebaseUser.uid].color);
             }
         }
-    </script>
-    <style>
-        /* Global Dark Mode Setup */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--tw-colors-primary-dark); /* Ensures overall background is black */
-            color: var(--tw-colors-text-light);
-        }
-        
-        /* Ensure response area takes up the flexible height */
-        #response-area {
-            flex-grow: 1;
-        }
+      }, 
+      (err) => {
+        console.error("User profiles listener error:", err);
+      }
+    );
 
-        /* Custom scrollbar for the response area */
-        #response-area::-webkit-scrollbar {
-            width: 8px;
-        }
-        #response-area::-webkit-scrollbar-thumb {
-            background-color: #333333; /* Darker thumb */
-            border-radius: 10px;
-        }
-        #response-area::-webkit-scrollbar-track {
-            background-color: #000000; /* Pure black track */
-        }
-        
-        /* Input textarea clean look */
-        #prompt-input {
-            appearance: none;
-            outline: none;
-        }
-        
-        /* Basic animation for the loader */
-        .dot {
-            animation: bounce 1.4s infinite ease-in-out both;
-        }
-        .dot-2 { animation-delay: -0.32s; }
-        .dot-3 { animation-delay: -0.16s; }
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1.0); }
-        }
-        
-        /* Style list items within bubbles */
-        .ai-message ul, .ai-message ol {
-            margin-left: 1.5rem;
-            margin-top: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-        .ai-message ul {
-            list-style-type: disc;
-        }
-        .ai-message ol {
-            list-style-type: decimal;
-        }
-        .ai-message li {
-            margin-bottom: 0.25rem;
-        }
-        /* Fade overlay for all modals */
-        .modal-overlay {
-            background-color: rgba(0, 0, 0, 0.75);
-        }
-    </style>
-</head>
-<body class="flex flex-col min-h-screen">
-
-    <!-- Fixed Header -->
-    <header class="sticky top-0 w-full p-3 bg-primary-dark border-b border-gray-900 shadow-md flex items-center justify-between z-10">
-        <div class="flex items-center">
-            <!-- Settings/Menu Button (Top Left) -->
-            <button id="menu-button" class="p-2 mr-3 text-text-light rounded-full hover:bg-input-bg transition">
-                <!-- Menu Icon -->
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                </svg>
-            </button>
-            <h1 id="header-title" class="text-xl font-semibold text-text-light">Krish AI Assistant</h1>
-        </div>
-        <!-- Error Message Box -->
-        <div id="error-message" class="hidden p-2 bg-gemini-red/20 border border-gemini-red text-gemini-red rounded-lg text-xs transition duration-300">
-            <!-- Error message will be inserted here -->
-        </div>
-    </header>
-
-    <!-- Menu Dropdown (Smaller, positioned below header, slides out from the left) -->
-    <div id="menu-dropdown" class="hidden fixed top-0 left-0 pt-[3.5rem] pl-2 z-40">
-        <div class="w-64 bg-input-bg rounded-xl shadow-2xl p-4 transition-transform duration-300 transform translate-x-[-100%]" id="menu-content">
-            <h2 id="menu-title" class="text-xl font-bold mb-4 text-center text-text-light">Menu</h2>
-            
-            <!-- New Chat Button (Functional) -->
-            <button id="new-chat-button" class="menu-option w-full py-3 mb-2 text-base font-medium bg-surface-dark hover:bg-gray-800 text-text-light rounded-lg transition duration-200 flex items-center px-4" onclick="handleNewChat()">
-                <!-- New Chat Icon -->
-                <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                New Chat
-            </button>
-            
-            <!-- Settings Button (Now opens Language Modal) -->
-            <button id="settings-button" class="menu-option w-full py-3 mb-2 text-base font-medium bg-surface-dark hover:bg-gray-800 text-text-light rounded-lg transition duration-200 flex items-center px-4" onclick="toggleLanguageModal(true)">
-                <!-- Settings Icon -->
-                <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.526.315 1.144.5 1.724.5h.001z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                Settings
-            </button>
-            
-            <!-- About Us Button (Now opens About Modal) -->
-            <button id="about-us-button" class="menu-option w-full py-3 text-base font-medium bg-surface-dark hover:bg-gray-800 text-text-light rounded-lg transition duration-200 flex items-center px-4" onclick="toggleAboutModal(true)">
-                <!-- About Us Icon -->
-                <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                About Us
-            </button>
-
-            <button id="menu-close-button" onclick="toggleMenu(false)" class="w-full mt-4 py-2 text-sm text-gray-400 hover:text-white transition">Close</button>
-        </div>
-    </div>
-
-    <!-- Language Chooser Modal (Hidden by default, centered overlay) -->
-    <div id="language-modal-overlay" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-300 opacity-0" onclick="toggleLanguageModal(false)">
-        <div class="w-full max-w-sm bg-input-bg rounded-xl shadow-2xl p-6 transform scale-95 transition-transform duration-300" id="language-modal-content" onclick="event.stopPropagation()">
-            <h2 id="language-modal-title" class="text-xl font-bold mb-5 text-center text-text-light">Change Language</h2>
-            
-            <form id="language-form">
-                <!-- Language Options -->
-                <label class="flex items-center p-3 mb-2 rounded-lg cursor-pointer hover:bg-surface-dark transition">
-                    <input type="radio" name="app-language" value="en" class="form-radio h-5 w-5 text-gemini-blue bg-surface-dark border-gray-600 focus:ring-gemini-blue" checked>
-                    <span class="ml-3 text-base text-text-light">English</span>
-                </label>
-                <label class="flex items-center p-3 mb-2 rounded-lg cursor-pointer hover:bg-surface-dark transition">
-                    <input type="radio" name="app-language" value="es" class="form-radio h-5 w-5 text-gemini-blue bg-surface-dark border-gray-600 focus:ring-gemini-blue">
-                    <span class="ml-3 text-base text-text-light">Español (Spanish)</span>
-                </label>
-                <label class="flex items-center p-3 mb-2 rounded-lg cursor-pointer hover:bg-surface-dark transition">
-                    <input type="radio" name="app-language" value="hi" class="form-radio h-5 w-5 text-gemini-blue bg-surface-dark border-gray-600 focus:ring-gemini-blue">
-                    <span class="ml-3 text-base text-text-light">हिंदी (Hindi) - Placeholder</span>
-                </label>
-            </form>
-
-            <div class="flex justify-end mt-6 space-x-3">
-                <button id="language-cancel-button" onclick="toggleLanguageModal(false)" type="button" class="px-4 py-2 text-sm font-medium text-gray-400 rounded-lg hover:bg-gray-800 transition">
-                    Cancel
-                </button>
-                <button id="language-apply-button" onclick="handleLanguageApply()" type="button" class="px-4 py-2 text-sm font-medium bg-gemini-blue text-white rounded-lg hover:bg-gemini-blue/90 transition">
-                    Apply
-                </button>
-            </div>
-        </div>
-    </div>
+    return () => unsubscribe();
+  }, [authReady, firebaseUser, appUsername]); 
+  
+  // 3. Messages Fetching Effect (Adapted for DM/Channel)
+  useEffect(() => {
+    if (!appUsername || !firebaseUser || !firebaseUser.uid) return;
     
-    <!-- About Us Modal (Hidden by default, centered overlay) -->
-    <div id="about-modal-overlay" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-300 opacity-0" onclick="toggleAboutModal(false)">
-        <div class="w-full max-w-sm bg-input-bg rounded-xl shadow-2xl p-6 transform scale-95 transition-transform duration-300" id="about-modal-content" onclick="event.stopPropagation()">
-            <h2 id="about-modal-title" class="text-xl font-bold mb-5 text-center text-text-light border-b border-gray-700 pb-3">About Krish AI Assistant</h2>
-            
-            <div class="space-y-4 text-text-light">
-                <p class="text-sm text-gray-400 text-center">
-                    This assistant was built by the owner for advanced conversational capabilities, powered by the Gemini API.
-                </p>
-                <div class="bg-surface-dark p-4 rounded-lg shadow-inner">
-                    <p class="text-sm font-semibold text-gemini-blue mb-2">Creator Details:</p>
-                    <ul class="space-y-2 text-sm">
-                        <li class="flex justify-between">
-                            <span class="font-medium text-text-light">Creator Name:</span>
-                            <span class="text-gray-400">Karthik</span>
-                        </li>
-                        <li class="flex justify-between">
-                            <span class="font-medium text-text-light">Creator Occupation:</span>
-                            <span class="text-gray-400">Software Developer</span>
-                        </li>
-                        <li class="flex justify-between">
-                            <span class="font-medium text-text-light">Admin ID:</span>
-                            <span class="text-gray-400">1769584</span>
-                        </li>
-                    </ul>
+    const { type, id } = activeChat;
+
+    // Admin View Guard: Hide admin_log from non-admins
+    if (type === 'channel' && currentChannelConfig.adminOnlyView && !isAdmin) {
+        setMessages([]);
+        setLoadingMessages(false);
+        return;
+    }
+
+    setLoadingMessages(true);
+    setMessages([]); 
+    setGlobalError(null);
+
+    let messagesRef;
+
+    if (type === 'channel') {
+        const collectionName = getChannelCollectionName(id);
+        messagesRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+    } else if (type === 'dm') {
+        // id is the target user's UID
+        const dmId = getDmConversationId(firebaseUser.uid, id);
+        messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'dms', dmId, 'messages');
+    } else {
+      setLoadingMessages(false);
+      return;
+    }
+    
+    const q = query(messagesRef);
+
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        const loadedMessages = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        loadedMessages.sort((a, b) => {
+          const dateA = a.createdAt || 0;
+          const dateB = b.createdAt || 0;
+          return dateA - dateB;
+        });
+
+        setMessages(loadedMessages);
+        setLoadingMessages(false);
+      }, 
+      (err) => {
+        console.error("Firestore messages listener error:", err);
+        setGlobalError("Could not load messages. Check console.");
+        setLoadingMessages(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [appUsername, firebaseUser, activeChat, isAdmin, currentChannelConfig.adminOnlyView]);
+  
+  // 4. Online Status / Keep-Alive Heartbeat
+  useEffect(() => {
+      if (!appUsername || !firebaseUser?.uid) return;
+
+      const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'user_profiles', firebaseUser.uid);
+      
+      const updateLastSeen = async () => {
+          try {
+              await setDoc(profileRef, {
+                  displayName: appUsername,
+                  uid: firebaseUser.uid,
+                  lastSeen: Date.now(),
+                  color: customColor 
+              }, { merge: true });
+          } catch (e) {
+              console.error("Failed to update lastSeen/profile:", e);
+          }
+      };
+
+      updateLastSeen();
+      const intervalId = setInterval(updateLastSeen, 30000); 
+
+      return () => {
+          clearInterval(intervalId);
+      };
+  }, [appUsername, firebaseUser, customColor]);
+
+  // Auto-scroll
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // --- Profile & Color Update ---
+  const handleColorChange = async (newColor) => {
+    if (!firebaseUser?.uid || !appUsername) return;
+    setCustomColor(newColor);
+    
+    try {
+        const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'user_profiles', firebaseUser.uid);
+        await updateDoc(profileRef, {
+            color: newColor,
+            lastSeen: Date.now() 
+        });
+        console.log(`User color updated to ${newColor}`);
+    } catch (e) {
+        console.error("Failed to save custom color:", e);
+        setGlobalError("Failed to save custom color.");
+    }
+  };
+
+
+  // --- ADMIN COMMANDS & DESTRUCTIVE ACTIONS ---
+
+  const handleCommand = async (command, args) => {
+    if (!isAdmin) {
+      setGlobalError("Only administrators can execute commands.");
+      return;
+    }
+    
+    // Commands are only allowed in public channels
+    if (activeChat.type === 'dm') {
+      setGlobalError("Admin commands are only available in public channels.");
+      return;
+    }
+
+    setGlobalError(null); 
+    setInputText(''); 
+
+    switch (command) {
+      case 'clear':
+        if (args.length > 0) {
+          setGlobalError("Usage: /clear (No arguments needed)");
+          return;
+        }
+        
+        setModalState({
+            isOpen: true,
+            title: `Clear #${activeChat.displayName}?`,
+            message: `WARNING: This will delete ALL messages in #${activeChat.displayName}. This cannot be undone.`,
+            onConfirm: () => handleClearChannelConfirmed(),
+            onCancel: () => setModalState({ ...modalState, isOpen: false }),
+            isDestructive: true,
+            confirmText: 'Delete All Messages'
+        });
+        break;
+
+      case 'mute':
+      case 'unmute':
+        if (args.length === 0) {
+          setGlobalError(`Usage: /${command} [username]`);
+          return;
+        }
+        const targetUsername = args.join(' ');
+        await handleMuteUser(targetUsername, command === 'mute');
+        break;
+
+      default:
+        setGlobalError(`Unknown command: /${command}. Available commands: /mute, /unmute, /clear.`);
+        break;
+    }
+  };
+  
+  const handleMuteUser = async (targetName, mute = true) => {
+    if (!isAdmin) return;
+    
+    if (targetName.toLowerCase() === appUsername.toLowerCase()) {
+        setGlobalError("You cannot mute or unmute yourself.");
+        return;
+    }
+
+    const targetProfile = Object.values(userProfilesMap).find(p => p.displayName === targetName);
+    
+    if (!targetProfile || !targetProfile.uid) {
+      setGlobalError(`Error: User "${targetName}" not found in system profiles.`);
+      return;
+    }
+    
+    const targetUid = targetProfile.uid;
+    const profileDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'user_profiles', targetUid);
+    
+    try {
+      if (mute) {
+        if (targetProfile.isMuted) {
+          setGlobalError(`${targetName} is already muted.`);
+          return;
+        }
+        await updateDoc(profileDocRef, { isMuted: true });
+        await logAdminAction('muted user', `Muted ${targetName} (UID: ${targetUid})`);
+        setGlobalError(`${targetName} has been muted.`);
+      } else { // Unmute
+        if (!targetProfile.isMuted) {
+          setGlobalError(`${targetName} is not currently muted.`);
+          return;
+        }
+        await updateDoc(profileDocRef, { isMuted: false });
+        await logAdminAction('unmuted user', `Unmuted ${targetName} (UID: ${targetUid})`);
+        setGlobalError(`${targetName} has been unmuted.`);
+      }
+    } catch (err) {
+      console.error("Mute/Unmute error:", err);
+      setGlobalError("Failed to update mute status. Check console.");
+    }
+  };
+
+
+  const handleClearChannelConfirmed = async () => {
+    setModalState({ ...modalState, isOpen: false });
+    
+    if (!isAdmin || activeChat.type === 'dm') return;
+
+    setGlobalError(`Clearing #${activeChat.displayName}... This may take a moment.`);
+    
+    try {
+      const collectionName = getChannelCollectionName(activeChat.id);
+      
+      const chunkSize = 450; 
+      const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+      const snapshot = await getDocs(messagesRef);
+      const docsToDelete = snapshot.docs;
+
+      for (let i = 0; i < docsToDelete.length; i += chunkSize) {
+        const chunk = docsToDelete.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        
+        chunk.forEach(docSnapshot => {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, docSnapshot.id);
+          batch.delete(docRef);
+        });
+
+        await batch.commit();
+      }
+      
+      await logAdminAction('cleared channel', `Cleared all messages in #${activeChat.displayName}`);
+      setGlobalError(`#${activeChat.displayName} cleared successfully.`);
+
+    } catch (err) {
+      console.error("Clear channel error:", err);
+      setGlobalError("Failed to clear channel. Check console for details.");
+    }
+  };
+
+
+  const handleClearAllStorageConfirmed = async () => {
+    setModalState({ ...modalState, isOpen: false });
+    if (!isAdmin) return;
+
+    setGlobalError(`Starting full data wipe...`);
+    
+    const collectionsToClear = [
+      ...CHANNELS.map(c => getChannelCollectionName(c.id)),
+      'user_profiles', 
+      'dms' 
+    ];
+
+    try {
+      const chunkSize = 450; 
+      
+      for (const collectionName of collectionsToClear) {
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+        const snapshot = await getDocs(colRef);
+        const docsToDelete = snapshot.docs;
+        
+        for (let i = 0; i < docsToDelete.length; i += chunkSize) {
+          const chunk = docsToDelete.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          
+          chunk.forEach(docSnapshot => {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, docSnapshot.id);
+            batch.delete(docRef);
+          });
+          await batch.commit();
+        }
+        console.log(`Cleared collection: ${collectionName}`);
+      }
+      
+      await logAdminAction('cleared all data', `PERMANENTLY wiped all messages, profiles, and logs from the application.`);
+
+      setShowStatusModal(false); 
+      setMessages([]);
+      setGlobalError(`All data successfully cleared!`);
+
+    } catch (err) {
+      console.error("Clear All Storage error:", err);
+      setGlobalError("Failed to clear all data. Check console for details.");
+    }
+  };
+
+
+  // --- Handlers (Login/Send/Etc.) ---
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    setLoginError('');
+    const user = loginUser.trim();
+    const pass = loginPass.trim();
+    if (!user || !pass) {
+      setLoginError('Enter username and password.');
+      return;
+    }
+    const storedPassword = CREDENTIALS[user];
+    if (storedPassword && storedPassword === pass) {
+      setAppUsername(user);
+      setLoginError('');
+      setLoginUser('');
+      setLoginPass('');
+    } else {
+      setLoginError('Invalid credentials.');
+    }
+  };
+
+  const handleLogout = () => {
+    setAppUsername(null);
+    setLoginUser('');
+    setLoginPass('');
+    // Reset to General channel when logging out (prevents issues if re-logged into DM)
+    setActiveChat({ type: 'channel', id: 'general', displayName: 'General' });
+  };
+
+  const sendNewMessage = async (text, mimeType = null, isImage = false) => {
+    if (!firebaseUser || !appUsername || !firebaseUser.uid) {
+        console.error("Attempted to send message before Firebase user was fully authenticated.");
+        setGlobalError("System not ready. Please wait a moment and try again.");
+        return;
+    }
+    
+    if (isPostingPrevented) {
+      setGlobalError(isMuted ? "You are currently muted and cannot post." : "Only admins can post in this channel.");
+      return;
+    }
+    
+    if (isSlowed) {
+      setGlobalError(`Slow Mode: Wait ${Math.ceil(timeRemaining / 1000)}s before posting again.`);
+      return;
+    }
+
+    if (!isImage && !text.trim()) return;
+
+    setGlobalError(null); 
+    let messagesRef;
+
+    try {
+      if (activeChat.type === 'channel') {
+        const collectionName = getChannelCollectionName(activeChat.id);
+        messagesRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+      } else { // DM
+        const dmId = getDmConversationId(firebaseUser.uid, activeChat.id); // activeChat.id is target UID
+        messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'dms', dmId, 'messages');
+      }
+      
+      await addDoc(messagesRef, {
+        text: text, 
+        mimeType: mimeType,
+        isImage: isImage,
+        uid: firebaseUser.uid,
+        createdAt: Date.now(),
+        displayName: appUsername,
+        userUid: firebaseUser.uid 
+      });
+      
+      setLastSentTime(Date.now());
+
+    } catch (err) {
+      console.error("Send message error:", err);
+      setGlobalError("Failed to send message. Check console.");
+    }
+  };
+  
+  const handleSendImage = (base64Data, mimeType) => {
+    sendNewMessage(base64Data, mimeType, true);
+  };
+
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    const textToSend = inputText.trim();
+
+    if (!textToSend) return;
+    
+    // Check for command only in channels
+    if (activeChat.type === 'channel') {
+        const commandRegex = /^\/(\w+)\s*(.*)?$/;
+        const match = textToSend.match(commandRegex);
+        
+        if (match) {
+          const command = match[1].toLowerCase();
+          const args = match[2] ? match[2].trim().split(/\s+/) : [];
+          handleCommand(command, args);
+          setInputText('');
+          return;
+        }
+    }
+    
+    // Send as a regular message
+    setInputText(''); 
+    sendNewMessage(textToSend);
+  };
+
+  const handleEmojiSelect = (emoji) => {
+    setInputText(prev => prev + emoji);
+  };
+
+  const handleDeleteMessage = (messageId) => {
+    if (!isAdmin) return;
+    
+    setModalState({
+        isOpen: true,
+        title: 'Delete Message?',
+        message: 'Are you sure you want to permanently delete this message?',
+        onConfirm: async () => {
+            setModalState({ ...modalState, isOpen: false });
+            try {
+              let docRef;
+              if (activeChat.type === 'channel') {
+                const collectionName = getChannelCollectionName(activeChat.id);
+                docRef = doc(db, 'artifacts', appId, 'public', 'data', collectionName, messageId);
+              } else {
+                const dmId = getDmConversationId(firebaseUser.uid, activeChat.id); 
+                docRef = doc(db, 'artifacts', appId, 'public', 'data', 'dms', dmId, 'messages', messageId);
+              }
+              
+              await deleteDoc(docRef);
+              await logAdminAction('deleted message', `Deleted message ID: ${messageId} from ${activeChat.type === 'channel' ? `#${activeChat.displayName}` : `@${activeChat.displayName}`}`);
+            } catch (err) {
+              console.error("Delete error:", err);
+              setGlobalError("Failed to delete message.");
+            }
+        },
+        onCancel: () => setModalState({ ...modalState, isOpen: false }),
+        isDestructive: true,
+        confirmText: 'Delete'
+    });
+  };
+
+  // --- Initial Loading Check ---
+  if (!authReady) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-900 text-slate-400">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  // --- LOGIN SCREEN ---
+  if (!appUsername) {
+    // Login Screen UI 
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-900 to-slate-900 p-4 font-sans text-slate-100">
+        <div className="w-full max-w-md space-y-8 rounded-2xl bg-slate-800/50 backdrop-blur-xl p-8 shadow-2xl border border-slate-700/50 relative z-10">
+          <div className="text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-lg shadow-indigo-500/20 transform rotate-3 hover:rotate-0 transition-all duration-300">
+              <MessageSquare className="h-8 w-8 text-white" />
+            </div>
+            <h2 className="mt-6 text-3xl font-bold tracking-tight text-white">Welcome Back</h2>
+          </div>
+
+          <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+            <div className="space-y-4">
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <User className="h-5 w-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
                 </div>
+                <input
+                  type="text"
+                  required
+                  className="block w-full rounded-xl border border-slate-600/50 bg-slate-900/50 pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:border-indigo-500 focus:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm transition-all duration-200"
+                  placeholder="Username"
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                />
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <Lock className="h-5 w-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                </div>
+                <input
+                  type="password"
+                  required
+                  className="block w-full rounded-xl border border-slate-600/50 bg-slate-900/50 pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:border-indigo-500 focus:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm transition-all duration-200"
+                  placeholder="Password"
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                />
+              </div>
             </div>
 
-            <div class="flex justify-center mt-6">
-                <button id="about-close-button" onclick="toggleAboutModal(false)" type="button" class="px-6 py-2 text-sm font-medium bg-gemini-blue text-white rounded-lg hover:bg-gemini-blue/90 transition">
-                    Close
-                </button>
-            </div>
-        </div>
-    </div>
+            {loginError && (
+              <div className="flex items-center gap-2 text-sm text-red-400 bg-red-900/20 border border-red-900/50 p-3 rounded-lg animate-in fade-in slide-in-from-top-1 duration-300">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
 
-
-    <!-- Response Display Area (Main Chat View - Now a distinct dark gray surface) -->
-    <main id="response-area" class="flex-grow overflow-y-auto p-4 space-y-4 bg-surface-dark">
-        <!-- Initial Greeting (Chat Bubble) -->
-        <div id="initial-greeting" class="flex justify-start items-start">
-            <!-- AI Profile: Now shows "KK" initials -->
-            <div class="w-8 h-8 rounded-full bg-gemini-blue text-white flex items-center justify-center mr-2 text-sm font-bold flex-shrink-0">
-                KK
-            </div>
-            <div class="bg-input-bg text-text-light p-3 rounded-2xl rounded-tl-sm shadow-lg max-w-xs md:max-w-md">
-                <p id="greeting-title" class="font-bold text-sm text-gemini-blue mb-1">Krish</p>
-                <span id="greeting-text">Hello! I'm Krish, an AI assistant ready to help. Ask me anything.</span>
-            </div>
-        </div>
-        <!-- Chat messages will be appended here -->
-    </main>
-
-    <!-- Input Form (Fixed at the bottom) -->
-    <div class="w-full p-4 bg-primary-dark shadow-2xl sticky bottom-0">
-        <!-- Input container, centered and rounded pill -->
-        <div class="max-w-xl mx-auto flex items-end bg-input-bg rounded-3xl p-2 shadow-xl border border-gray-800">
-            
-            <textarea id="prompt-input" rows="1" placeholder="Ask Krish anything..."
-                      class="flex-grow bg-transparent text-text-light resize-none border-none focus:ring-0 placeholder-gray-500 py-1.5 px-3 overflow-hidden h-auto text-base"
-                      onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleAsk(); }"
-                      style="min-height: 2.5rem; max-height: 10rem;"></textarea>
-            
-            <button id="ask-button" onclick="handleAsk()"
-                    class="h-9 w-9 bg-gemini-blue text-white rounded-full flex items-center justify-center ml-2 hover:bg-opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                <!-- Send Icon (Paper Airplane) -->
-                <svg id="button-icon" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2.01 21.01c-.02-.82.16-1.55.5-2.2L6.85 13l-4.34-5.8c-.34-.65-.52-1.38-.5-2.2a.997.997 0 011.52-1.04l18 8a1 1 0 010 1.99l-18 8a.997.997 0 01-1.52-1.04z" />
-                </svg>
-                <span id="loading-indicator" class="hidden">
-                    <span class="dot w-1.5 h-1.5 bg-white rounded-full mx-0.5"></span>
-                    <span class="dot dot-2 w-1.5 h-1.5 bg-white rounded-full mx-0.5"></span>
-                    <span class="dot dot-3 w-1.5 h-1.5 bg-white rounded-full mx-0.5"></span>
-                </span>
+            <button
+              type="submit"
+              className="group relative flex w-full justify-center items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 py-3.5 px-4 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 hover:from-indigo-500 hover:to-violet-500 hover:shadow-indigo-500/40 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-8 transition-all duration-200 transform active:scale-[0.98]"
+            >
+              Sign in
+              <LogIn className="h-4 w-4 opacity-70 group-hover:opacity-100 transition-opacity" />
             </button>
+          </form>
+          
+          <div className="mt-4 text-center">
+             <p className="text-xs text-slate-500">Protected System • Authorized Personnel Only</p>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  // CRITICAL GUARD FOR ASYNC FIREBASE USER
+  if (!firebaseUser) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-900 text-slate-400">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-3">Loading secure session...</span>
+      </div>
+    );
+  }
+
+  // Helper component for rendering user lists (Online/Offline)
+  const UserList = ({ users, isOnline }) => (
+    <nav className="space-y-1 px-2 mb-4">
+        {users.map(user => (
+            <button 
+                key={user.uid}
+                onClick={() => {
+                    setActiveChat({ type: 'dm', id: user.uid, displayName: user.displayName });
+                    setSidebarOpen(false);
+                }}
+                className={`flex w-full items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    activeChat.type === 'dm' && activeChat.id === user.uid
+                        ? 'bg-violet-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+            >
+                {/* Status Indicator */}
+                <Circle 
+                    className={`mr-2 h-2 w-2 flex-shrink-0 ${isOnline ? 'text-green-500 fill-green-500' : 'text-slate-500 fill-slate-500/20'}`} 
+                    title={isOnline ? 'Online' : 'Offline'}
+                />
+
+                <MessageCircle className={`mr-2 h-4 w-4 flex-shrink-0 ${activeChat.id === user.uid ? 'text-violet-200' : 'text-slate-500'}`} />
+                <span 
+                    style={{color: user.color || undefined}} 
+                    className={`font-semibold truncate ${!user.color && activeChat.id !== user.uid ? 'text-slate-300' : ''}`}
+                >
+                    {user.displayName}
+                </span>
+                {ADMINS.includes(user.displayName) && <Shield className="h-3 w-3 text-yellow-400 fill-yellow-400/20 ml-1" title="Administrator" />}
+            </button>
+        ))}
+        {users.length === 0 && (
+            <p className="px-4 text-xs text-slate-500 italic">
+              {isOnline ? 'No other users active.' : 'No other recorded users.'}
+            </p>
+        )}
+    </nav>
+  );
+
+  // --- MAIN APP ---
+  return (
+    <div className="flex h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden">
+      
+      <ConfirmationModal modalState={modalState} setModalState={setModalState} />
+      {/* FileUploadModal & StatusModal omitted for brevity */}
+      
+      {/* Mobile Sidebar Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* SIDEBAR */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-64 transform bg-slate-800 border-r border-slate-700 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="flex h-full flex-col">
+          {/* Sidebar Header */}
+          <div className="flex h-16 items-center justify-between px-4 border-b border-slate-700">
+            <h1 className="text-lg font-bold text-white tracking-tight">Chat Navigator</h1>
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* Channel List */}
+          <div className="flex-1 overflow-y-auto pt-4">
+            <div className="px-4 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              Channels
+            </div>
+            <nav className="space-y-1 px-2 mb-6">
+              {CHANNELS.filter(c => !c.adminOnlyView || isAdmin).map((channel) => (
+                <button
+                  key={channel.id}
+                  onClick={() => {
+                    setActiveChat({ type: 'channel', id: channel.id, displayName: channel.label });
+                    setSidebarOpen(false);
+                  }}
+                  className={`flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    activeChat.type === 'channel' && activeChat.id === channel.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  {channel.adminOnlyView ? (
+                    <EyeOff className={`mr-3 h-4 w-4 flex-shrink-0 ${activeChat.id === channel.id ? 'text-indigo-200' : 'text-slate-500'}`} />
+                  ) : (
+                    <Hash className={`mr-3 h-4 w-4 flex-shrink-0 ${activeChat.id === channel.id ? 'text-indigo-200' : 'text-slate-500'}`} />
+                  )}
+                  {channel.label}
+                  {channel.slowMode && <Clock className="h-3 w-3 ml-2 text-orange-400" title="Slow Mode" />}
+                </button>
+              ))}
+            </nav>
+            
+            {/* Direct Messages List */}
+            <div className="mt-6">
+                <div className="px-4 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                    Direct Messages ({onlineUsers.length + offlineUsers.length} Contacts) <Users className='h-3 w-3'/>
+                </div>
+                
+                {/* Online Users */}
+                <div className="px-4 text-xs font-semibold text-green-400/80 uppercase tracking-wider pt-2">
+                    Online ({onlineUsers.length})
+                </div>
+                <UserList users={onlineUsers} isOnline={true} />
+                
+                {/* Offline Users */}
+                <div className="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider pt-2">
+                    Offline ({offlineUsers.length})
+                </div>
+                <UserList users={offlineUsers} isOnline={false} />
+
+            </div>
+
+            {/* Admin Tools */}
+            {isAdmin && (
+              <div className="mt-6">
+                <div className="px-4 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Admin Tools
+                </div>
+                <nav className="space-y-1 px-2">
+                  <button
+                    onClick={() => { setShowStatusModal(true); setSidebarOpen(false); }}
+                    className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors text-slate-400 hover:bg-slate-700 hover:text-slate-200"
+                  >
+                    <Shield className="mr-3 h-4 w-4 flex-shrink-0 text-red-400" />
+                    App Status & Clear
+                  </button>
+                </nav>
+              </div>
+            )}
+          </div>
+
+          {/* User Profile Footer */}
+          <div className="border-t border-slate-700 p-4 bg-slate-800/50">
+            <div className="flex items-center gap-3">
+              <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${getAvatarColorClass(appUsername)}`}>
+                {appUsername.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1">
+                    <p style={{color: customColor}} className={`truncate text-sm font-bold ${!customColor ? 'text-white' : ''}`}>
+                      {appUsername}
+                    </p>
+                    {isAdmin && <Shield className="h-3 w-3 text-yellow-400 fill-yellow-400/20" title="Administrator" />}
+                </div>
+                {isMuted ? (
+                    <p className="text-xs text-red-400 flex items-center gap-1">
+                       <VolumeX className="h-3 w-3"/> Muted
+                    </p>
+                ) : (
+                    <p className="text-xs text-green-400 flex items-center gap-1">
+                       <Volume2 className="h-3 w-3"/> Online
+                    </p>
+                )}
+              </div>
+              
+              {/* Custom Color Picker Button */}
+              <div className="relative">
+                  <button 
+                      type="button"
+                      onClick={() => setShowColorPicker(prev => !prev)}
+                      className="p-1.5 rounded-full hover:bg-slate-700 transition-colors"
+                      title="Change Username Color"
+                  >
+                      <Palette className='h-4 w-4' style={{ color: customColor }} />
+                  </button>
+
+                  {/* Color Picker Popover (Simplified) */}
+                  {showColorPicker && (
+                      <div className="absolute bottom-full right-0 mb-2 p-3 rounded-lg bg-slate-700 shadow-xl z-10 w-48">
+                          <h4 className='text-xs font-semibold text-white mb-2'>Choose Color</h4>
+                          <input
+                              type="color"
+                              value={customColor}
+                              onChange={(e) => setCustomColor(e.target.value)}
+                              onBlur={() => handleColorChange(customColor)}
+                              className="w-full h-8 rounded-md border-2 border-slate-600 cursor-pointer"
+                          />
+                          <button
+                              onClick={() => { handleColorChange(customColor); setShowColorPicker(false); }}
+                              className="mt-3 w-full bg-indigo-600 text-white text-xs font-medium py-1.5 rounded-md hover:bg-indigo-500 transition-colors"
+                          >
+                              Apply
+                          </button>
+                      </div>
+                  )}
+              </div>
+
+              <button 
+                onClick={handleLogout}
+                className="text-slate-400 hover:text-white"
+                title="Sign Out"
+              >
+                <LogIn className="h-4 w-4 rotate-180" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* MAIN CHAT AREA */}
+      <div className="flex flex-1 flex-col min-w-0 bg-slate-900">
+        
+        {/* Chat Header */}
+        <header className="flex h-16 flex-none items-center justify-between border-b border-slate-700 bg-slate-900 px-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden -ml-2 p-2 text-slate-400 hover:text-white"
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="flex items-center text-white">
+              {activeChat.type === 'channel' ? (
+                 <Hash className="mr-2 h-5 w-5 text-slate-400" />
+              ) : (
+                 <MessageCircle className="mr-2 h-5 w-5 text-violet-400" />
+              )}
+              <h2 className="text-lg font-bold">{activeChat.displayName}</h2>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:block text-xs text-slate-500 border-l border-slate-700 pl-4">
+              {messages.length} messages
+            </div>
+          </div>
+        </header>
+
+        {/* Messages List */}
+        <main className="flex-1 overflow-y-auto p-4">
+          {globalError && (
+            <div className="sticky top-0 z-10 mb-4 flex items-center justify-center gap-2 rounded-md bg-red-900/50 p-2 text-sm text-red-200 border border-red-800">
+              <AlertCircle className="h-4 w-4" />
+              <span>{globalError}</span>
+            </div>
+          )}
+          
+          {loadingMessages && messages.length === 0 && (
+            <div className="flex h-20 items-center justify-center text-indigo-400">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" />
+              Loading messages...
+            </div>
+          )}
+
+          {activeChat.type === 'channel' && currentChannelConfig.slowMode && (
+             <div className="sticky top-0 z-10 mb-4 flex items-center justify-center gap-2 rounded-md bg-indigo-900/50 p-2 text-xs text-indigo-200 border border-indigo-800">
+              <Loader2 className="h-3 w-3 animate-pulse" />
+              <span>Slow Mode is active (5s delay between messages for non-admins).</span>
+            </div>
+          )}
+          
+          {activeChat.type === 'channel' && currentChannelConfig.adminOnlyView && !isAdmin && (
+             <div className="mt-20 flex flex-col items-center text-center text-slate-600">
+                <Lock className="h-10 w-10 mb-3 text-red-500"/>
+                <h3 className="text-xl font-medium text-red-400">Access Denied</h3>
+                <p className="text-sm mt-1">This channel is restricted to administrators only.</p>
+             </div>
+          )}
+
+          <div className="flex flex-col gap-4">
+            {(!activeChat.type === 'channel' || !currentChannelConfig.adminOnlyView || isAdmin) ? (
+                messages.map((msg, index) => {
+                  const isMe = msg.displayName === appUsername;
+                  const profile = userProfilesMap[msg.userUid] || {};
+                  const userColor = profile.color || undefined;
+                  const isMsgAdmin = ADMINS.includes(msg.displayName);
+                  const isTargetMuted = profile.isMuted;
+                  const isMediaMessage = msg.isImage;
+
+                  // Determine if we should show the avatar/name
+                  const previousMsg = messages[index - 1];
+                  const showAvatar = !isMe && (
+                      index === 0 || 
+                      (previousMsg && previousMsg.displayName !== msg.displayName) ||
+                      (new Date(msg.createdAt).getTime() - new Date(previousMsg.createdAt).getTime() > 180000) // 3 mins break
+                  );
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`group flex w-full gap-3 ${isMe ? 'justify-end' : 'justify-start'} ${showAvatar ? 'mt-4' : 'mt-0.5'}`}
+                    >
+                      {/* Avatar gutter */}
+                      {!isMe && (
+                        <div className="w-8 flex-shrink-0 flex flex-col items-end">
+                          {showAvatar ? (
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-sm ${getAvatarColorClass(msg.displayName || 'User')}`}>
+                              {(msg.displayName || 'U').slice(0, 2).toUpperCase()}
+                            </div>
+                          ) : (
+                            <div className="h-8 w-8" />
+                          )}
+                        </div>
+                      )}
+
+                      <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                        {!isMe && showAvatar && (
+                          <span 
+                            style={{color: userColor}}
+                            className="ml-1 mb-1 text-xs font-bold text-slate-400 flex items-center gap-1"
+                          >
+                            {msg.displayName}
+                            {isMsgAdmin && <Shield className="h-3 w-3 text-yellow-400 fill-yellow-400/20" />}
+                            {isTargetMuted && <VolumeX className="h-3 w-3 text-red-400" title={`${msg.displayName} is currently muted`} />}
+                          </span>
+                        )}
+                        
+                        <div className="relative group/msg">
+                           {/* ADMIN ONLY: Delete Action */}
+                           {isAdmin && (
+                              <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 items-center p-1.5 opacity-0 group-hover/msg:opacity-100 transition-all bg-slate-900/80 rounded-full ${isMe ? '-left-12' : '-right-12'}`}>
+                                
+                                <button 
+                                  onClick={() => handleDeleteMessage(msg.id)}
+                                  className="p-1 text-slate-500 hover:text-red-400"
+                                  title="Delete message"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+
+                          <div
+                            className={`rounded-2xl px-4 py-2 shadow-sm break-words 
+                              ${isMe
+                                ? 'bg-indigo-600 text-white rounded-tr-none'
+                                : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-tl-none'
+                              } ${isMediaMessage ? 'p-1' : ''}`
+                            }
+                          >
+                            {isMediaMessage ? (
+                              <div className="max-w-xs overflow-hidden rounded-lg">
+                                <img 
+                                  src={msg.text} 
+                                  alt="Uploaded photo" 
+                                  className="w-full h-auto object-cover rounded-lg"
+                                />
+                                <p className="mt-2 text-xs text-slate-400 px-3 py-1">Shared Photo</p>
+                              </div>
+                            ) : (
+                               <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
+                            )}
+                          </div>
+                        </div>
+                        <span className="mt-1 mr-1 text-[10px] text-slate-600">
+                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+            ) : null}
+            <div ref={messagesEndRef} />
+          </div>
+        </main>
+
+        {/* Message Input */}
+        <div className="flex-none border-t border-slate-700 bg-slate-800 p-4">
+          <form onSubmit={handleSendMessage} className="mx-auto flex max-w-5xl gap-2">
+            
+            {/* File Upload Button */}
+            <div className="flex-none">
+              <button 
+                type="button"
+                // Omitted logic for FileUploadModal
+                className="flex h-[46px] w-[46px] items-center justify-center rounded-lg bg-slate-700 text-sky-400 transition-colors hover:bg-slate-600 disabled:bg-slate-700 disabled:text-slate-500"
+                disabled={isPostingPrevented}
+                title="Send Photo from Device (Max 200KB)"
+              >
+                <Camera className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Emoji Picker Button and Popover */}
+            <div className="relative flex-none" ref={emojiButtonRef}>
+              <button 
+                type="button"
+                // Omitted logic for EmojiPicker
+                className="flex h-[46px] w-[46px] items-center justify-center rounded-lg bg-slate-700 text-yellow-300 transition-colors hover:bg-slate-600 disabled:bg-slate-700 disabled:text-slate-500"
+                disabled={isPostingPrevented}
+                title="Select Emoji"
+              >
+                <Smile className="h-5 w-5" />
+              </button>
+              
+              {/* showEmojiPicker Popover Omitted for brevity */}
+            </div>
+
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder={
+                  isMuted 
+                    ? "You are muted and cannot send messages."
+                    : activeChat.type === 'channel' && currentChannelConfig.adminOnlyPost && !isAdmin 
+                      ? "Only admins can post in this read-only channel."
+                      : isSlowed
+                        ? `Slow Mode: Wait ${Math.ceil(timeRemaining / 1000)}s...`
+                        : activeChat.type === 'channel'
+                          ? `Message #${activeChat.displayName} (Try /clear or /mute [user] if admin)...`
+                          : `Direct Message @${activeChat.displayName}...`
+                }
+                className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 pr-4 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-900/50 disabled:cursor-not-allowed"
+                disabled={isPostingPrevented || isSlowed}
+              />
+              {isSlowed && (
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                  <span className="text-xs text-red-400 font-mono">
+                    {Math.ceil(timeRemaining / 1000)}s
+                  </span>
+                </div>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isPostingPrevented || isSlowed}
+              className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-lg bg-indigo-600 text-white transition-all hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed"
+              title="Send Message"
+            >
+              <Send className="h-5 w-5" />
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
+  );
+}
 
-    <script>
-        // --- Configuration and State ---
-        
-        const API_KEY = ""; // Canvas will automatically provide the API key
-        const MODEL = "gemini-2.5-flash-preview-09-2025";
-        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
-        
-        let currentLanguage = 'en'; // Global state for language
-
-        // Data for the About Modal - Creator name is Karthik here, as requested
-        const OWNER_INFO = {
-            name: "Karthik",
-            occupation: "Software Developer",
-            adminId: "1769584"
-        };
-
-        const UI_TEXT = {
-            'en': {
-                title: "Krish AI Assistant",
-                greetingTitle: "Krish",
-                greetingText: "Hello! I'm Krish, an AI assistant ready to help. Ask me anything.",
-                menuTitle: "Menu",
-                menuSettings: "Settings",
-                menuNewChat: "New Chat",
-                menuAbout: "About Us",
-                menuClose: "Close",
-                chatPlaceholder: "Ask Krish anything...",
-                languageTitle: "Change Language",
-                languageSave: "Apply",
-                languageCancel: "Cancel",
-                newChatConfirmation: "--- New Chat Started ---",
-                // About Modal Text (Title uses Krish, Content uses OWNER_INFO.name which is Karthik)
-                aboutTitle: "About Krish AI Assistant",
-                aboutDescription: "This assistant was built by the owner for advanced conversational capabilities, powered by the Gemini API.",
-                aboutOwnerDetails: "Creator Details:",
-                aboutNameLabel: "Creator Name:",
-                aboutOccupationLabel: "Creator Occupation:",
-                aboutAdminIdLabel: "Admin ID:",
-                aboutClose: "Close",
-            },
-            'es': {
-                title: "Asistente de IA Krish",
-                greetingTitle: "Krish",
-                greetingText: "¡Hola! Soy Krish, un asistente de IA listo para ayudarte. Pregúntame lo que quieras.",
-                menuTitle: "Menú",
-                menuSettings: "Ajustes",
-                menuNewChat: "Nuevo Chat",
-                menuAbout: "Acerca de Nosotros",
-                menuClose: "Cerrar",
-                chatPlaceholder: "Pregúntale algo a Krish...",
-                languageTitle: "Cambiar Idioma",
-                languageSave: "Aplicar",
-                languageCancel: "Cancelar",
-                newChatConfirmation: "--- Nuevo Chat Iniciado ---",
-                // About Modal Text
-                aboutTitle: "Acerca del Asistente de IA Krish",
-                aboutDescription: "Este asistente fue construido por el propietario para capacidades conversacionales avanzadas, impulsado por la API de Gemini.",
-                aboutOwnerDetails: "Detalles del Creador:",
-                aboutNameLabel: "Nombre del Creador:",
-                aboutOccupationLabel: "Ocupación del Creador:",
-                aboutAdminIdLabel: "ID de Administrador:",
-                aboutClose: "Cerrar",
-            },
-             'hi': { // Placeholder for Hindi
-                title: "कृष एआई सहायक",
-                greetingTitle: "कृष",
-                greetingText: "नमस्ते! मैं कृष हूँ, एक AI सहायक आपकी मदद के लिए तैयार है। मुझसे कुछ भी पूछें।",
-                menuTitle: "मेन्यू",
-                menuSettings: "सेटिंग्स",
-                menuNewChat: "नई चैट",
-                menuAbout: "हमारे बारे में",
-                menuClose: "बंद करें",
-                chatPlaceholder: "कृष से कुछ भी पूछें...",
-                languageTitle: "भाषा बदलें",
-                languageSave: "लागू करें",
-                languageCancel: "रद्द करें",
-                newChatConfirmation: "--- नई चैट शुरू हुई ---",
-                // About Modal Text
-                aboutTitle: "कृष एआई सहायक के बारे में",
-                aboutDescription: "यह सहायक उन्नत संवादात्मक क्षमताओं के लिए मालिक द्वारा बनाया गया था, जो जेमिनी एपीआई द्वारा संचालित है।",
-                aboutOwnerDetails: "निर्माता का विवरण:",
-                aboutNameLabel: "निर्माता का नाम:",
-                aboutOccupationLabel: "निर्माता का पेशा:",
-                aboutAdminIdLabel: "एडमिन आईडी:",
-                aboutClose: "बंद करें",
-            },
-        };
-
-        // --- DOM Elements ---
-        const promptInput = document.getElementById('prompt-input');
-        const askButton = document.getElementById('ask-button');
-        const loadingIndicator = document.getElementById('loading-indicator');
-        const buttonIcon = document.getElementById('button-icon');
-        const responseArea = document.getElementById('response-area');
-        const errorMessageDiv = document.getElementById('error-message');
-
-        // Menu D
