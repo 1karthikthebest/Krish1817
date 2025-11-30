@@ -119,7 +119,8 @@
                 Your powerful, real-time conversational partner powered by Gemini Flash. 
                 Start a session and experience seamless, intelligent dialogue.
             </p>
-            <button onclick="showChat()" class="px-8 py-3 text-lg font-semibold bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+            <!-- ID added here, and onclick removed -->
+            <button id="get-started-button" class="px-8 py-3 text-lg font-semibold bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
                 Get Started
             </button>
         </div>
@@ -224,13 +225,11 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         
         // --- API Configuration ---
-        // The API key is set to an empty string. The secure environment will automatically inject 
-        // the correct key during the fetch call, preventing the key from being exposed in source code.
         const apiKey = ""; 
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
         
         // --- State and UI Elements ---
-        let chatHistory = []; // Stores conversation history for context in the API call
+        let chatHistory = []; 
         
         const landingPage = document.getElementById('landing-page');
         const chatApp = document.getElementById('chat-app');
@@ -240,6 +239,8 @@
         const chatHistoryContainer = document.getElementById('chat-history');
         const errorMessage = document.getElementById('error-message');
         const errorText = document.getElementById('error-text');
+        // New: Get the Get Started button element
+        const getStartedButton = document.getElementById('get-started-button');
 
         // Initial setup for textarea auto-resize
         promptInput.addEventListener('input', () => {
@@ -250,7 +251,7 @@
         /**
          * Transitions from the landing page to the chat application.
          */
-        window.showChat = function() {
+        function showChat() {
             // Hide the landing page instantly
             landingPage.classList.add('hidden');
             
@@ -264,9 +265,28 @@
             renderChat();
         }
 
+        // Expose functions to the global scope that are needed for inline clicks (like settings)
+        window.toggleSettings = function() {
+            const settingsPanel = document.getElementById('settings-panel');
+            settingsPanel.classList.toggle('hidden');
+        }
+
+        window.clearHistory = function() {
+            chatHistory = [];
+            renderChat();
+            window.toggleSettings(); // Close settings panel
+            showError("Chat history has been cleared.");
+            setTimeout(clearError, 3000); 
+        }
+
+
+        // --- Event Listener for Get Started Button (The fix) ---
+        // This runs when the script module loads, ensuring the listener is attached correctly.
+        getStartedButton.addEventListener('click', showChat);
+
+
         /**
          * Shows the error message box with the given text.
-         * @param {string} message - The error message to display.
          */
         function showError(message) {
             errorText.textContent = message;
@@ -282,7 +302,6 @@
 
         /**
          * Enables/disables the input and shows/hides the loading indicator.
-         * @param {boolean} isLoading - Whether the application is currently loading.
          */
         function setLoadingState(isLoading) {
             promptInput.disabled = isLoading;
@@ -291,26 +310,6 @@
             loadingIndicator.classList.toggle('hidden', !isLoading);
         }
         
-        /**
-         * Toggles the visibility of the settings panel overlay.
-         */
-        window.toggleSettings = function() {
-            const settingsPanel = document.getElementById('settings-panel');
-            settingsPanel.classList.toggle('hidden');
-        }
-
-        /**
-         * Clears the chat history and re-renders the initial welcome message.
-         */
-        window.clearHistory = function() {
-            chatHistory = [];
-            renderChat();
-            toggleSettings(); // Close settings panel
-            // Optionally notify the user
-            showError("Chat history has been cleared.");
-            setTimeout(clearError, 3000); // Clear error message after 3 seconds
-        }
-
         /**
          * Renders all messages in the chatHistory array.
          */
@@ -356,16 +355,12 @@
 
         /**
          * Fetches content from the Gemini API with exponential backoff for retries.
-         * @param {Array} history - The full conversation history array.
-         * @param {number} attempt - Current retry attempt number (starts at 1).
-         * @returns {Promise<object>} The successful response JSON object.
          */
         async function fetchGeminiContent(history, attempt = 1) {
             const MAX_RETRIES = 5;
-            const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+            const delay = Math.pow(2, attempt) * 1000; 
 
             const payload = {
-                // Pass the entire history array for context
                 contents: history, 
             };
 
@@ -384,7 +379,7 @@
             } catch (error) {
                 if (attempt < MAX_RETRIES) {
                     await new Promise(resolve => setTimeout(resolve, delay));
-                    return fetchGeminiContent(history, attempt + 1); // Retry
+                    return fetchGeminiContent(history, attempt + 1); 
                 } else {
                     throw new Error("Failed to connect to the AI service after multiple retries. Please check your connection or try again later.");
                 }
@@ -428,4 +423,18 @@
                     // Remove the user message if AI fails to respond cleanly
                     chatHistory.pop(); 
                     renderChat();
-                    showErro
+                    showError("The AI service returned an empty or invalid response.");
+                }
+
+            } catch (error) {
+                // Remove the user message if API call failed
+                chatHistory.pop(); 
+                renderChat();
+                showError(error.message);
+                console.error("API Call Error:", error);
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        // Allow submitting by pressing Enter (and resizing for Shif
